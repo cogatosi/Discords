@@ -27,7 +27,6 @@ export default {
 
     async execute(interaction, config, client) {
         try {
-            // 1. Initial Setup and Deferral
             await InteractionHelper.safeDefer(interaction);
 
             const levelingConfig = await getLevelingConfig(client, interaction.guildId);
@@ -46,21 +45,18 @@ export default {
                 throw new TitanBotError(`User ${targetUser.id} not found`, ErrorTypes.USER_INPUT, 'User not found.');
             }
 
-            // 2. Fetch User Data
             const userData = await getUserLevelData(client, interaction.guildId, targetUser.id);
             const level = userData?.level ?? 0;
             const xp = userData?.xp ?? 0;
             const xpNeeded = getXpForLevel(level + 1);
 
-            // 3. Canvas Generation
+            // --- CANVAS DRAWING ---
             const canvas = Canvas.createCanvas(700, 250);
             const ctx = canvas.getContext('2d');
 
-            // Background
             ctx.fillStyle = '#23272a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Profile Picture (Avatar)
             const avatarUrl = targetUser.displayAvatarURL({ extension: 'png', size: 256 });
             const avatar = await Canvas.loadImage(avatarUrl);
             ctx.save();
@@ -71,7 +67,6 @@ export default {
             ctx.drawImage(avatar, 45, 45, 160, 160);
             ctx.restore();
 
-            // Text Info
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 36px sans-serif';
             ctx.fillText(member.displayName, 240, 80);
@@ -80,36 +75,39 @@ export default {
             ctx.fillText(`Level ${level}`, 240, 130);
             ctx.fillText(`${xp} / ${xpNeeded} XP`, 500, 130);
 
-            // Progress Bar
             ctx.fillStyle = '#484b4e';
             ctx.fillRect(240, 160, 400, 25);
             const progress = Math.min(xp / xpNeeded, 1);
             ctx.fillStyle = '#5865F2';
             ctx.fillRect(240, 160, 400 * progress, 25);
 
-            // 4. Create UI Components (Button)
+            // --- BUTTONS ---
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('open_shop')
                     .setLabel('🛒 Card Shop')
-                    .setStyle(ButtonStyle.Primary) // Corrected from setButtonStyle
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('open_settings')
+                    .setLabel('⚙️ Settings')
+                    .setStyle(ButtonStyle.Secondary)
             );
 
             const attachment = new AttachmentBuilder(await canvas.toBuffer(), { name: 'rank.png' });
 
-            // 5. Send Initial Response
             const response = await InteractionHelper.safeEditReply(interaction, { 
                 files: [attachment], 
                 components: [row] 
             });
 
-            // 6. Shop Interaction Collector
-            const filter = (i) => i.customId === 'open_shop' && i.user.id === interaction.user.id;
-            const collector = response.createMessageComponentCollector({ filter, time: 60000 });
+            // --- COLLECTOR ---
+            const collector = response.createMessageComponentCollector({ 
+                filter: (i) => i.user.id === interaction.user.id, 
+                time: 60000 
+            });
 
             collector.on('collect', async (i) => {
-                try {
-                    // Use reply with Ephemeral flag for the shop menu
+                if (i.customId === 'open_shop') {
                     await i.reply({
                         content: '### ✨ Limited GIF Card Shop\nSelect a background to preview:',
                         components: [
@@ -120,25 +118,32 @@ export default {
                         ],
                         flags: MessageFlags.Ephemeral 
                     });
-                } catch (err) {
-                    logger.error('Shop button interaction error:', err);
+                } else if (i.customId === 'open_settings') {
+                    await i.reply({
+                        content: '### ⚙️ Rank Settings\nChoose a NamePlate style:',
+                        components: [
+                            new ActionRowBuilder().addComponents(
+                                new ButtonBuilder().setCustomId('plate_classic').setLabel('Classic').setStyle(ButtonStyle.Primary),
+                                new ButtonBuilder().setCustomId('plate_neon').setLabel('Neon').setStyle(ButtonStyle.Success),
+                                new ButtonBuilder().setCustomId('plate_dark').setLabel('Dark Mode').setStyle(ButtonStyle.Secondary)
+                            )
+                        ],
+                        flags: MessageFlags.Ephemeral 
+                    });
                 }
             });
 
             collector.on('end', () => {
-                // Optionally disable the button after timeout to prevent "Interaction Failed"
                 const disabledRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('open_shop')
-                        .setLabel('🛒 Card Shop (Closed)')
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(true)
+                    new ButtonBuilder().setCustomId('open_shop').setLabel('🛒 Card Shop').setStyle(ButtonStyle.Primary).setDisabled(true),
+                    new ButtonBuilder().setCustomId('open_settings').setLabel('⚙️ Settings').setStyle(ButtonStyle.Secondary).setDisabled(true)
                 );
                 interaction.editReply({ components: [disabledRow] }).catch(() => null);
             });
 
         } catch (error) {
-            logger.error('Rank command execution failed:', error);
+            // Only show the error box if the main command actually crashes
+            logger.error('Rank command error:', error);
             await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
         }
     }

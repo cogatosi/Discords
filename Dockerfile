@@ -1,20 +1,25 @@
-FROM node:20-alpine
+FROM node:20
 
-# Create app directory
+# 1. Install the drawing libraries needed for the Canvas rank card
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev
+
+# 2. Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
-# A wildcard is used to ensure both package.json AND package-lock.json are copied
+# 3. Copy package files
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm ci --omit=dev
+# 4. Use 'npm install' because we deleted the lockfile
+RUN npm install
 
-# Bundle app source
+# 5. Copy the rest of your bot's code
 COPY . .
 
-# Expose the health check port from src/app.js
-EXPOSE 3000
-
-# Start the bot
+# 6. Start the bot
 CMD [ "npm", "start" ]

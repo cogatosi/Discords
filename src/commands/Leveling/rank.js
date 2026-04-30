@@ -32,7 +32,7 @@ export default {
         let canvasBuffer;
         const targetUser = interaction.options.getUser('user') || interaction.user;
 
-        // 2. Data & Canvas Block (The only part that should show the Red Error Box if it fails)
+        // 2. Data & Canvas Block (Strict Error Handling)
         try {
             const levelingConfig = await getLevelingConfig(client, interaction.guildId);
             if (!levelingConfig?.enabled) {
@@ -85,7 +85,7 @@ export default {
             return await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
         }
 
-        // 3. UI and Interaction Block (NO RED ERROR BOX ALLOWED HERE)
+        // 3. UI Block (Resilient & Silent)
         try {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('open_shop').setLabel('🛒 Card Shop').setStyle(ButtonStyle.Primary),
@@ -94,18 +94,18 @@ export default {
 
             const attachment = new AttachmentBuilder(canvasBuffer, { name: 'rank.png' });
 
-            const response = await InteractionHelper.safeEditReply(interaction, { 
+            // We MUST capture the message object here to attach the collector
+            const message = await interaction.editReply({ 
                 files: [attachment], 
                 components: [row] 
             });
 
-            const collector = response.createMessageComponentCollector({ 
+            const collector = message.createMessageComponentCollector({ 
                 filter: (i) => i.user.id === interaction.user.id, 
-                time: 60000 
+                time: 120000 // Increased to 2 minutes
             });
 
             collector.on('collect', async (i) => {
-                // Silently handle button clicks
                 try {
                     if (i.customId === 'open_shop') {
                         await i.reply({
@@ -132,17 +132,26 @@ export default {
                         });
                     }
                 } catch (err) {
-                    logger.error('Button Click Error (Silent):', err);
+                    // This prevents the bot from crashing if the user clicks too fast
+                    logger.error('Collector Collect Error:', err);
                 }
             });
 
-            collector.on('end', () => {
-                // Just remove components, no error calls
-                interaction.editReply({ components: [] }).catch(() => null);
+            collector.on('end', async () => {
+                try {
+                    // Silently disable buttons when time runs out
+                    const disabledRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('open_shop').setLabel('🛒 Card Shop').setStyle(ButtonStyle.Primary).setDisabled(true),
+                        new ButtonBuilder().setCustomId('open_settings').setLabel('⚙️ Settings').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                    );
+                    await interaction.editReply({ components: [disabledRow] });
+                } catch (e) {
+                    // No action needed if message was deleted
+                }
             });
 
         } catch (uiError) {
-            logger.error('UI Logic Error (Silent):', uiError);
+            logger.error('UI Logic Error:', uiError);
         }
     }
 };

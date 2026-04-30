@@ -26,6 +26,9 @@ export default {
     category: 'Leveling',
 
     async execute(interaction, config, client) {
+        // We use a local variable to track if the main image failed
+        let mainActionFailed = false;
+
         try {
             await InteractionHelper.safeDefer(interaction);
 
@@ -53,7 +56,6 @@ export default {
             // --- CANVAS DRAWING ---
             const canvas = Canvas.createCanvas(700, 250);
             const ctx = canvas.getContext('2d');
-
             ctx.fillStyle = '#23272a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -100,36 +102,41 @@ export default {
                 components: [row] 
             });
 
-            // --- COLLECTOR ---
+            // --- COLLECTOR (SILENT MODE) ---
             const collector = response.createMessageComponentCollector({ 
                 filter: (i) => i.user.id === interaction.user.id, 
                 time: 60000 
             });
 
             collector.on('collect', async (i) => {
-                if (i.customId === 'open_shop') {
-                    await i.reply({
-                        content: '### ✨ Limited GIF Card Shop\nSelect a background to preview:',
-                        components: [
-                            new ActionRowBuilder().addComponents(
-                                new ButtonBuilder().setCustomId('shop_1').setLabel('🔥 Fire').setStyle(ButtonStyle.Secondary),
-                                new ButtonBuilder().setCustomId('shop_2').setLabel('🌌 Galaxy').setStyle(ButtonStyle.Secondary)
-                            )
-                        ],
-                        flags: MessageFlags.Ephemeral 
-                    });
-                } else if (i.customId === 'open_settings') {
-                    await i.reply({
-                        content: '### ⚙️ Rank Settings\nChoose a NamePlate style:',
-                        components: [
-                            new ActionRowBuilder().addComponents(
-                                new ButtonBuilder().setCustomId('plate_classic').setLabel('Classic').setStyle(ButtonStyle.Primary),
-                                new ButtonBuilder().setCustomId('plate_neon').setLabel('Neon').setStyle(ButtonStyle.Success),
-                                new ButtonBuilder().setCustomId('plate_dark').setLabel('Dark Mode').setStyle(ButtonStyle.Secondary)
-                            )
-                        ],
-                        flags: MessageFlags.Ephemeral 
-                    });
+                try {
+                    if (i.customId === 'open_shop') {
+                        await i.reply({
+                            content: '### ✨ Limited GIF Card Shop\nSelect a background to preview:',
+                            components: [
+                                new ActionRowBuilder().addComponents(
+                                    new ButtonBuilder().setCustomId('shop_1').setLabel('🔥 Fire').setStyle(ButtonStyle.Secondary),
+                                    new ButtonBuilder().setCustomId('shop_2').setLabel('🌌 Galaxy').setStyle(ButtonStyle.Secondary)
+                                )
+                            ],
+                            flags: MessageFlags.Ephemeral 
+                        });
+                    } else if (i.customId === 'open_settings') {
+                        await i.reply({
+                            content: '### ⚙️ Rank Settings\nChoose a NamePlate style:',
+                            components: [
+                                new ActionRowBuilder().addComponents(
+                                    new ButtonBuilder().setCustomId('plate_classic').setLabel('Classic').setStyle(ButtonStyle.Primary),
+                                    new ButtonBuilder().setCustomId('plate_neon').setLabel('Neon').setStyle(ButtonStyle.Success),
+                                    new ButtonBuilder().setCustomId('plate_dark').setLabel('Dark Mode').setStyle(ButtonStyle.Secondary)
+                                )
+                            ],
+                            flags: MessageFlags.Ephemeral 
+                        });
+                    }
+                } catch (e) {
+                    // Silently log button errors instead of showing the red box
+                    logger.error('Button interaction failed:', e);
                 }
             });
 
@@ -142,8 +149,9 @@ export default {
             });
 
         } catch (error) {
-            // Only show the error box if the main command actually crashes
-            logger.error('Rank command error:', error);
+            // ONLY if the actual rank card fails to draw/send, show an error
+            mainActionFailed = true;
+            logger.error('Rank command drawing error:', error);
             await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
         }
     }

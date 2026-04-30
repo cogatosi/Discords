@@ -1,127 +1,128 @@
-
-
-
-
-
-import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
+import { 
+    SlashCommandBuilder, 
+    AttachmentBuilder, 
+    MessageFlags, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle 
+} from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError, TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { getUserLevelData, getLevelingConfig, getXpForLevel } from '../../services/leveling.js';
-
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import Canvas from 'canvas';
+
 export default {
-  data: new SlashCommandBuilder()
-    .setName('rank')
-    .setDescription("Check your or another user's rank and level")
-    .addUserOption((option) =>
-      option
-        .setName('user')
-        .setDescription('The user to check the rank of')
-        .setRequired(false)
-    )
-    .setDMPermission(false),
-  category: 'Leveling',
-
-  
-
-
-
-
-
-  async execute(interaction, config, client) {
-    try {
-      await InteractionHelper.safeDefer(interaction);
-
-      const levelingConfig = await getLevelingConfig(client, interaction.guildId);
-      if (!levelingConfig?.enabled) {
-        await InteractionHelper.safeEditReply(interaction, {
-          embeds: [
-            new EmbedBuilder()
-              .setColor('#f1c40f')
-              .setDescription('The leveling system is currently disabled on this server.')
-          ],
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      const targetUser = interaction.options.getUser('user') || interaction.user;
-      const member = await interaction.guild.members
-        .fetch(targetUser.id)
-        .catch(() => null);
-
-      if (!member) {
-        throw new TitanBotError(
-          `User ${targetUser.id} not found in guild`,
-          ErrorTypes.USER_INPUT,
-          'Could not find the specified user in this server.'
-        );
-      }
-
-      const userData = await getUserLevelData(client, interaction.guildId, targetUser.id);
-
-      const safeUserData = {
-        level: userData?.level ?? 0,
-        xp: userData?.xp ?? 0,
-        totalXp: userData?.totalXp ?? 0
-      };
-
-      const xpNeeded = getXpForLevel(safeUserData.level + 1);
-      const progress = xpNeeded > 0 ? Math.floor((safeUserData.xp / xpNeeded) * 100) : 0;
-      const progressBar = createProgressBar(progress, 20);
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${member.displayName}'s Rank`)
-        .setThumbnail(member.displayAvatarURL({ dynamic: true }))
-        .addFields(
-          {
-            name: '📊 Level',
-            value: safeUserData.level.toString(),
-            inline: true
-          },
-          {
-            name: '⭐ XP',
-            value: `${safeUserData.xp}/${xpNeeded}`,
-            inline: true
-          },
-          {
-            name: '✨ Total XP',
-            value: safeUserData.totalXp.toString(),
-            inline: true
-          },
-          {
-            name: `Progress to Level ${safeUserData.level + 1}`,
-            value: `${progressBar} ${progress}%`
-          }
+    data: new SlashCommandBuilder()
+        .setName('rank')
+        .setDescription("Check your or another user's rank and level")
+        .addUserOption((option) =>
+            option
+                .setName('user')
+                .setDescription('The user to check the rank of')
+                .setRequired(false)
         )
-        .setColor('#2ecc71')
-        .setTimestamp();
+        .setDMPermission(false),
+    category: 'Leveling',
 
-      await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-      logger.debug(`Rank checked for user ${targetUser.id} in guild ${interaction.guildId}`);
-    } catch (error) {
-      logger.error('Rank command error:', error);
-      await handleInteractionError(interaction, error, {
-        type: 'command',
-        commandName: 'rank'
-      });
+    async execute(interaction, config, client) {
+        try {
+            await InteractionHelper.safeDefer(interaction);
+
+            // 1. Check if Leveling is enabled
+            const levelingConfig = await getLevelingConfig(client, interaction.guildId);
+            if (!levelingConfig?.enabled) {
+                await InteractionHelper.safeEditReply(interaction, {
+                    content: 'The leveling system is currently disabled on this server.',
+                    flags: MessageFlags.Ephemeral
+                });
+                return;
+            }
+
+            // 2. Get User Data
+            const targetUser = interaction.options.getUser('user') || interaction.user;
+            const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+            if (!member) {
+                throw new TitanBotError(`User ${targetUser.id} not found`, ErrorTypes.USER_INPUT, 'User not found.');
+            }
+
+            const userData = await getUserLevelData(client, interaction.guildId, targetUser.id);
+            const level = userData?.level ?? 0;
+            const xp = userData?.xp ?? 0;
+            const xpNeeded = getXpForLevel(level + 1);
+
+            // 3. Draw the Rank Card
+            const canvas = Canvas.createCanvas(700, 250);
+            const ctx = canvas.getContext('2d');
+
+            // Dark Background
+            ctx.fillStyle = '#23272a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Avatar Circle
+            const avatarUrl = targetUser.displayAvatarURL({ extension: 'png', size: 256 });
+            const avatar = await Canvas.loadImage(avatarUrl);
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(125, 125, 80, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(avatar, 45, 45, 160, 160);
+            ctx.restore();
+
+            // Text Styles
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 36px sans-serif';
+            ctx.fillText(member.displayName, 240, 80);
+
+            ctx.font = '24px sans-serif';
+            ctx.fillText(`Level ${level}`, 240, 130);
+            ctx.fillText(`${xp} / ${xpNeeded} XP`, 500, 130);
+
+            // Progress Bar
+            ctx.fillStyle = '#484b4e';
+            ctx.fillRect(240, 160, 400, 25);
+            const progress = Math.min(xp / xpNeeded, 1);
+            ctx.fillStyle = '#5865F2'; // Discord Blue
+            ctx.fillRect(240, 160, 400 * progress, 25);
+
+            // 4. Create Shop Button
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('open_shop')
+                    .setLabel('🛒 Card Shop')
+                    .setButtonStyle(ButtonStyle.Primary)
+            );
+
+            const attachment = new AttachmentBuilder(await canvas.toBuffer(), { name: 'rank.png' });
+
+            // 5. Send Result
+            const response = await InteractionHelper.safeEditReply(interaction, { 
+                files: [attachment], 
+                components: [row] 
+            });
+
+            // 6. Shop Interaction Collector
+            const filter = (i) => i.customId === 'open_shop' && i.user.id === interaction.user.id;
+            const collector = response.createMessageComponentCollector({ filter, time: 60000 });
+
+            collector.on('collect', async (i) => {
+                await i.reply({
+                    content: '### ✨ Limited GIF Card Shop\nSelect a background to preview (Gifs coming soon!):',
+                    components: [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder().setCustomId('shop_1').setLabel('🔥 Fire').setButtonStyle(ButtonStyle.Secondary),
+                            new ButtonBuilder().setCustomId('shop_2').setLabel('🌌 Galaxy').setButtonStyle(ButtonStyle.Secondary)
+                        )
+                    ],
+                    flags: MessageFlags.Ephemeral
+                });
+            });
+
+        } catch (error) {
+            logger.error('Rank command error:', error);
+            await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
+        }
     }
-  }
 };
-
-
-
-
-
-
-
-function createProgressBar(percentage, length = 10) {
-  if (percentage < 0 || percentage > 100) {
-    percentage = Math.max(0, Math.min(100, percentage));
-  }
-  const filled = Math.round((percentage / 100) * length);
-  return '█'.repeat(filled) + '░'.repeat(length - filled);
-}
-
-
-

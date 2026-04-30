@@ -26,34 +26,30 @@ export default {
     category: 'Leveling',
 
     async execute(interaction, config, client) {
-        // We use a local variable to track if the main image failed
-        let mainActionFailed = false;
+        // 1. Initial Deferral
+        await InteractionHelper.safeDefer(interaction);
 
+        let canvasBuffer;
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+
+        // 2. Data & Canvas Block (The only part that should show the Red Error Box if it fails)
         try {
-            await InteractionHelper.safeDefer(interaction);
-
             const levelingConfig = await getLevelingConfig(client, interaction.guildId);
             if (!levelingConfig?.enabled) {
-                await InteractionHelper.safeEditReply(interaction, {
+                return await InteractionHelper.safeEditReply(interaction, {
                     content: 'The leveling system is currently disabled on this server.',
                     flags: MessageFlags.Ephemeral
                 });
-                return;
             }
 
-            const targetUser = interaction.options.getUser('user') || interaction.user;
             const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-
-            if (!member) {
-                throw new TitanBotError(`User ${targetUser.id} not found`, ErrorTypes.USER_INPUT, 'User not found.');
-            }
+            if (!member) throw new Error('User not found');
 
             const userData = await getUserLevelData(client, interaction.guildId, targetUser.id);
             const level = userData?.level ?? 0;
             const xp = userData?.xp ?? 0;
             const xpNeeded = getXpForLevel(level + 1);
 
-            // --- CANVAS DRAWING ---
             const canvas = Canvas.createCanvas(700, 250);
             const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#23272a';
@@ -83,32 +79,33 @@ export default {
             ctx.fillStyle = '#5865F2';
             ctx.fillRect(240, 160, 400 * progress, 25);
 
-            // --- BUTTONS ---
+            canvasBuffer = await canvas.toBuffer();
+        } catch (error) {
+            logger.error('Rank Canvas Error:', error);
+            return await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
+        }
+
+        // 3. UI and Interaction Block (NO RED ERROR BOX ALLOWED HERE)
+        try {
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('open_shop')
-                    .setLabel('🛒 Card Shop')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('open_settings')
-                    .setLabel('⚙️ Settings')
-                    .setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId('open_shop').setLabel('🛒 Card Shop').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('open_settings').setLabel('⚙️ Settings').setStyle(ButtonStyle.Secondary)
             );
 
-            const attachment = new AttachmentBuilder(await canvas.toBuffer(), { name: 'rank.png' });
+            const attachment = new AttachmentBuilder(canvasBuffer, { name: 'rank.png' });
 
             const response = await InteractionHelper.safeEditReply(interaction, { 
                 files: [attachment], 
                 components: [row] 
             });
 
-            // --- COLLECTOR (SILENT MODE) ---
             const collector = response.createMessageComponentCollector({ 
                 filter: (i) => i.user.id === interaction.user.id, 
                 time: 60000 
             });
 
             collector.on('collect', async (i) => {
+                // Silently handle button clicks
                 try {
                     if (i.customId === 'open_shop') {
                         await i.reply({
@@ -134,25 +131,18 @@ export default {
                             flags: MessageFlags.Ephemeral 
                         });
                     }
-                } catch (e) {
-                    // Silently log button errors instead of showing the red box
-                    logger.error('Button interaction failed:', e);
+                } catch (err) {
+                    logger.error('Button Click Error (Silent):', err);
                 }
             });
 
             collector.on('end', () => {
-                const disabledRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('open_shop').setLabel('🛒 Card Shop').setStyle(ButtonStyle.Primary).setDisabled(true),
-                    new ButtonBuilder().setCustomId('open_settings').setLabel('⚙️ Settings').setStyle(ButtonStyle.Secondary).setDisabled(true)
-                );
-                interaction.editReply({ components: [disabledRow] }).catch(() => null);
+                // Just remove components, no error calls
+                interaction.editReply({ components: [] }).catch(() => null);
             });
 
-        } catch (error) {
-            // ONLY if the actual rank card fails to draw/send, show an error
-            mainActionFailed = true;
-            logger.error('Rank command drawing error:', error);
-            await handleInteractionError(interaction, error, { type: 'command', commandName: 'rank' });
+        } catch (uiError) {
+            logger.error('UI Logic Error (Silent):', uiError);
         }
     }
 };
